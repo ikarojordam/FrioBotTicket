@@ -18,3 +18,11 @@ Use Discloud com `discloud.config` na raiz. Configure `DISCORD_TOKEN`, `DISCORD_
 Todos os SQLs anteriores estão em `sql/`. Nenhum SQL novo nesta atualização.
 
 **Atenção:** testes de sintaxe não substituem testes com Discord/Supabase reais.
+
+
+## v3.9.0 — Emojis personalizados
+O catálogo usa os IDs originais enviados pelo proprietário. Não há substituição automática por Unicode. Para cópias locais, configure `AUTO_SYNC_EMOJIS=true` e conceda Gerenciar Expressões.
+
+
+## Desempenho v4.0
+`CACHE_TTL_MS=60000` define a validade do cache; `PERF_LOG=true` habilita medição local do início das respostas. O tempo medido não é a latência de rede.
