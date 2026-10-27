@@ -2,12 +2,13 @@
 import 'dotenv/config';
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, EmbedBuilder, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelSelectMenuBuilder, RoleSelectMenuBuilder, AttachmentBuilder } from 'discord.js';
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 import { buildTranscript } from './transcript.js';
 import { emoji, icon } from './emojis.js';
 
 const needed=['DISCORD_TOKEN','DISCORD_CLIENT_ID','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY'];
 for(const k of needed)if(!process.env[k])throw new Error(`Variável obrigatória ausente: ${k}`);
-const db=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false}});
+const db=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false},realtime:{transport:WebSocket}});
 const bot=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
 const devs=new Set((process.env.DEV_IDS||'').split(',').map(x=>x.trim()).filter(Boolean));
 const brand=process.env.BRAND_NAME||'Frio Tickets',fallbackSignature=process.env.BRAND_SIGNATURE||'Desenvolvido por FrioBots • FrioStore';
