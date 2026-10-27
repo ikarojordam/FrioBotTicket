@@ -22,5 +22,16 @@ export const EMOJIS = {
   "verify": "<a:verificado:1556704709602054154>",
   "help": "<:circle_help:1557452846281007274>"
 };
-export const emoji = (key) => { const raw=EMOJIS[key]; if (!raw) return undefined; const m=/^<(a?):([^:]+):(\d+)>$/.exec(raw); return m ? {id:m[3],name:m[2],animated:m[1]==="a"} : undefined; };
-export const icon = (key) => EMOJIS[key] || "";
+const FALLBACK = {config:'⚙️',appearance:'✏️',routing:'🛡️',ai:'🤖',automation:'⏰',departments:'📋',publish:'📣',stats:'📊',support:'🎫',claim:'✅',priority:'⚠️',close:'🔒',add:'➕',remove:'➖',enable:'🟢',disable:'🔴',edit:'✏️',delete:'🗑️',file:'📄',verify:'✅',help:'❓'};
+let clientRef;
+export const bindEmojiClient = client => { clientRef = client; };
+export const emoji = key => {
+  const raw = EMOJIS[key];
+  const m = raw && /^<(a?):([^:]+):(\d+)>$/.exec(raw);
+  if (m && clientRef) {
+    const found = clientRef.emojis.cache.find(e => e.name === m[2]);
+    if (found) return { id: found.id, name: found.name, animated: found.animated };
+  }
+  return FALLBACK[key] || '🎫';
+};
+export const icon = (key) => FALLBACK[key] || '🎫';
