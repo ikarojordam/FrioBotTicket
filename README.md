@@ -26,3 +26,11 @@ O catálogo usa os IDs originais enviados pelo proprietário. Não há substitui
 
 ## Desempenho v4.0
 `CACHE_TTL_MS=60000` define a validade do cache; `PERF_LOG=true` habilita medição local do início das respostas. O tempo medido não é a latência de rede.
+
+
+## v4.2 — resposta rápida
+Os botões que consultam o banco confirmam a interação antes da consulta. O encerramento abre o modal imediatamente. Emojis originais preservados. Consulte docs/CHANGELOG-v4.2.md.
+
+
+## v4.3 — Identidade visual
+Somente emojis personalizados do catálogo `src/emojis.js`. Emojis externos precisam estar acessíveis ao bot; use a sincronização com a permissão Gerenciar Expressões. Não há novo SQL.
