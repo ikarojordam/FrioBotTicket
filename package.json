@@ -1,6 +1,6 @@
 {
   "name": "frio-tickets",
-  "version": "3.4.3",
+  "version": "3.8.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/emojis.js && node --check src/transcript.js"
+    "check": "node --check src/index.js && node --check src/emojis.js && node --check src/emoji-sync.js && node --check src/transcript.js"
   },
   "dependencies": {
     "discord.js": "^14.22.1",
