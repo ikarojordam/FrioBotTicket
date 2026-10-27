@@ -20,18 +20,21 @@ export const EMOJIS = {
   "delete": "<:lixo:1544379771176230992>",
   "file": "<:arquivo:1544379265330581545>",
   "verify": "<a:verificado:1556704709602054154>",
-  "help": "<:circle_help:1557452846281007274>"
+  "help": "<:circle_help:1557452846281007274>",
+  "back": "<:seta_ghost:1556717902286291074>"
 };
-const FALLBACK = {config:'⚙️',appearance:'✏️',routing:'🛡️',ai:'🤖',automation:'⏰',departments:'📋',publish:'📣',stats:'📊',support:'🎫',claim:'✅',priority:'⚠️',close:'🔒',add:'➕',remove:'➖',enable:'🟢',disable:'🔴',edit:'✏️',delete:'🗑️',file:'📄',verify:'✅',help:'❓'};
+// Usa os IDs originais; jamais substitui silenciosamente por emojis Unicode.
+// Quando existir uma cópia instalada no servidor, usa a cópia local.
 let clientRef;
 export const bindEmojiClient = client => { clientRef = client; };
-export const emoji = key => {
+export const emoji = (key, guild = null) => {
   const raw = EMOJIS[key];
-  const m = raw && /^<(a?):([^:]+):(\d+)>$/.exec(raw);
-  if (m && clientRef) {
-    const found = clientRef.emojis.cache.find(e => e.name === m[2]);
-    if (found) return { id: found.id, name: found.name, animated: found.animated };
-  }
-  return FALLBACK[key] || '🎫';
+  if (!raw) throw new Error(`Emoji não cadastrado: ${key}`);
+  const match = /^<(a?):([^:]+):(\d+)>$/.exec(raw);
+  if (!match) throw new Error(`Emoji inválido: ${key}`);
+  const local = guild?.emojis?.cache?.find(e => e.name === match[2]);
+  const global = clientRef?.emojis?.cache?.get(match[3]);
+  const found = local || global;
+  return found ? { id: found.id, name: found.name, animated: found.animated } : { id: match[3], name: match[2], animated: Boolean(match[1]) };
 };
-export const icon = (key) => FALLBACK[key] || '🎫';
+export const icon = key => EMOJIS[key] || '';
