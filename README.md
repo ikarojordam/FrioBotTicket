@@ -34,3 +34,7 @@ Os botões que consultam o banco confirmam a interação antes da consulta. O en
 
 ## v4.3 — Identidade visual
 Somente emojis personalizados do catálogo `src/emojis.js`. Emojis externos precisam estar acessíveis ao bot; use a sincronização com a permissão Gerenciar Expressões. Não há novo SQL.
+
+
+## Diagnóstico v4.4
+Ative `PERF_LOG=true` para registrar o início do ACK e consulte avisos `[INTERACTION] ACK pendente >1500ms` nos logs. Para menus que ainda falharem, envie o `customId` e o log.
