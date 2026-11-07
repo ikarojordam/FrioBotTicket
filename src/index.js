@@ -122,10 +122,10 @@ async function closeTicket(i,t,s,reason='Encerrado pela equipe'){if(!i.deferred&
  if(t.voice_channel_id)await i.guild.channels.delete(t.voice_channel_id,'Ticket encerrado').catch(()=>{});
  await i.editReply(`Ticket encerrado. O canal será removido em alguns segundos.${dmOk===false?'\nNão foi possível enviar o transcript por DM (mensagens diretas fechadas).':''}`);setTimeout(()=>i.channel.delete('Ticket encerrado').catch(()=>{}),5000);}
 async function stats(g){const [tickets,ratings]=await Promise.all([query('tickets',q=>q.select('id,status,created_at').eq('guild_id',g).limit(1000)),query('ticket_ratings',q=>q.select('score').eq('guild_id',g).limit(1000))]);const avg=ratings.length?(ratings.reduce((a,b)=>a+b.score,0)/ratings.length).toFixed(2):'Sem avaliações';return `Tickets registrados (até 1000): **${tickets.length}**\nAbertos: **${tickets.filter(t=>t.status==='open').length}**\nEncerrados: **${tickets.filter(t=>t.status==='closed').length}**\nAvaliação média: **${avg}**`;}
-async function gemini(text,s,history=''){
+async function gemini(text,s,history='',timeoutMs=0){
  if(!process.env.GEMINI_API_KEY)return null;
  const model=process.env.GEMINI_MODEL||'gemini-3.8-flash';
- const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),Number(process.env.AI_TIMEOUT_MS)||25000);
+ const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),timeoutMs||Math.max(Number(process.env.AI_TIMEOUT_MS)||0,30000));
  try{
   // Gemini 3.x: sem temperature e com thinkingLevel (low/medium/high). Gemini 2.5: thinkingBudget. Outros: só temperature.
   const generationConfig={maxOutputTokens:1500};
@@ -210,7 +210,7 @@ if((i.isButton()||i.isModalSubmit())&&i.customId.startsWith('dev:')){
     if(!r.ok)return i.editReply(lines.join('\n'));
    }catch(e){lines.push(`1) Sem conexão com o Gemini a partir da hospedagem: ${e.name==='TimeoutError'?'tempo esgotado (10s)':`${e.message}${e.cause?.code?` (${e.cause.code})`:''}`}`);return i.editReply(lines.join('\n'));}
    const t2=Date.now();
-   try{const r=await gemini('Responda apenas: IA funcionando.',defaults);lines.push(`2) Resposta em ${Date.now()-t2} ms ✅: ${safe(r,300)}`);}
+   try{const r=await gemini('Responda apenas: IA funcionando.',defaults,'',60000);lines.push(`2) Resposta em ${Date.now()-t2} ms ✅: ${safe(r,300)}`);}
    catch(e){lines.push(`2) Falha ao gerar (${Date.now()-t2} ms): ${safe(e.message,600)}`);}
    return i.editReply(lines.join('\n'));
   }
@@ -323,14 +323,16 @@ bot.on('messageCreate',async m=>{
   await m.channel.sendTyping().catch(()=>{});
   const recent=await m.channel.messages.fetch({limit:8}).catch(()=>null);
   const history=recent?[...recent.values()].reverse().filter(x=>x.id!==m.id&&x.content).map(x=>`${x.author.bot?'Atendente':'Cliente'}: ${safe(x.content,300)}`).join('\n'):'';
-  let reply;
+  let reply;const typing=setInterval(()=>m.channel.sendTyping().catch(()=>{}),8000);
   try{reply=await gemini(m.content,s,history);}
   catch(e){
+   clearInterval(typing);
    console.error('IA falhou:',e.message);
    aiCooldown.set(key,Date.now()+52000);
    await m.reply({content:`Não consegui responder agora. Nossa equipe vai continuar o atendimento.${devs.has(m.author.id)?`\n-# Erro da IA (só aparece para devs): ${safe(e.message,400)}`:''}`,allowedMentions:{parse:[],repliedUser:false}}).catch(()=>{});
    return;
   }
+  clearInterval(typing);
   await m.reply({content:`**Assistente IA**\n${reply}`,allowedMentions:{parse:[],repliedUser:false}});
  }catch(e){console.error('IA/mensagem:',e.message);}
 });
