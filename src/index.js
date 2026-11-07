@@ -41,7 +41,7 @@ function devPanel(){
  const B=(id,label,key,style=ButtonStyle.Secondary)=>{const b=new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style);if(key)b.setEmoji(emoji(key));return b;};
  return {embeds:[e],components:[
   new ActionRowBuilder().addComponents(B('dev:profile','Perfil','appearance',ButtonStyle.Primary),B('dev:signature','Assinatura','edit'),B('dev:banner','Banner','publish'),B('dev:toggle_banner',globalBrand.banner_visible?'Ocultar banner':'Mostrar banner',globalBrand.banner_visible?'disable':'enable')),
-  new ActionRowBuilder().addComponents(B('dev:diagnostics','Diagnóstico','stats',ButtonStyle.Primary),B('dev:servers','Servidores','departments'),B('dev:cache','Limpar cache','delete')),
+  new ActionRowBuilder().addComponents(B('dev:diagnostics','Diagnóstico','stats',ButtonStyle.Primary),B('dev:servers','Servidores','departments'),B('dev:cache','Limpar cache','delete'),B('dev:test_ai','Testar IA','ai')),
   new ActionRowBuilder().addComponents(B('dev:sync_commands','Sincronizar /','repeat'),B('dev:sync_emojis','Sincronizar emojis','verify')),
   new ActionRowBuilder().addComponents(B('dev:refresh','Atualizar','config'))]};
 }
@@ -123,7 +123,7 @@ async function stats(g){const [tickets,ratings]=await Promise.all([query('ticket
 async function gemini(text,s,history=''){
  if(!process.env.GEMINI_API_KEY)return null;
  const model=process.env.GEMINI_MODEL||'gemini-3.8-flash';
- const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),Number(process.env.AI_TIMEOUT_MS)||15000);
+ const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),Number(process.env.AI_TIMEOUT_MS)||25000);
  try{
   // Gemini 3.x: sem temperature e com thinkingLevel (low/medium/high). Gemini 2.5: thinkingBudget. Outros: só temperature.
   const generationConfig={maxOutputTokens:1500};
@@ -133,9 +133,10 @@ async function gemini(text,s,history=''){
   if(!r.ok)throw Error(`Gemini ${r.status}: ${safe(await r.text().catch(()=>''),300)}`);
   const data=await r.json();
   const out=safe(data.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join(''),1800).trim();
-  if(!out)console.warn('IA: resposta vazia',data.candidates?.[0]?.finishReason||data.promptFeedback?.blockReason||'');
-  return out||null;
- }finally{clearTimeout(timer);}
+  if(!out)throw Error(`resposta vazia (${data.candidates?.[0]?.finishReason||data.promptFeedback?.blockReason||'sem motivo'})`);
+  return out;
+ }catch(e){if(e.name==='AbortError')throw Error('tempo esgotado ao chamar o Gemini');throw e;}
+ finally{clearTimeout(timer);}
 }
 const cmds=[
  new SlashCommandBuilder().setName('ticket').setDescription('Central de tickets FrioBots')
@@ -195,6 +196,7 @@ if((i.isButton()||i.isModalSubmit())&&i.customId.startsWith('dev:')){
   if(i.customId==='dev:diagnostics')return i.update({embeds:[embed('Diagnóstico • Frio Tickets',diagnostics())],components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('dev:home').setLabel('Voltar').setStyle(ButtonStyle.Secondary))]});
   if(i.customId==='dev:servers'){const names=[...bot.guilds.cache.values()].slice(0,30).map(g=>`• ${safe(g.name,60)} (${g.id})`).join('\n');return i.update({embeds:[embed('Servidores conectados',names||'Nenhum servidor.')],components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('dev:home').setLabel('Voltar').setStyle(ButtonStyle.Secondary))]});}
   if(i.customId==='dev:cache'){cache.clear();departmentCache.clear();return i.update({embeds:[embed('Cache limpo','As configurações serão recarregadas do Supabase quando necessárias.')],components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('dev:home').setLabel('Voltar').setStyle(ButtonStyle.Secondary))]});}
+  if(i.customId==='dev:test_ai'){await i.deferReply({flags:ephemeral});const t0=Date.now(),model=process.env.GEMINI_MODEL||'gemini-3.8-flash';if(!process.env.GEMINI_API_KEY)return i.editReply('GEMINI_API_KEY não está configurada na Discloud.');try{const r=await gemini('Responda apenas: IA funcionando.',defaults);return i.editReply(`IA ok em ${Date.now()-t0} ms\nModelo: ${model}\nResposta: ${safe(r,500)}`);}catch(e){return i.editReply(`Falha na IA (modelo ${model}):\n${safe(e.message,1500)}`);}}
   if(i.customId==='dev:sync_commands'){await i.deferUpdate();await new REST({version:'10'}).setToken(process.env.DISCORD_TOKEN).put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID),{body:cmds});return i.editReply(devPanel());}
   if(i.customId==='dev:sync_emojis'){await i.deferReply({flags:ephemeral});let created=0,failed=0;for(const g of bot.guilds.cache.values()){try{const r=await syncGuildEmojis(g);created+=r.created;failed+=r.failed.length;}catch{failed++;}}return i.editReply(`Emojis sincronizados: ${created} novos; ${failed} falhas.`);}
 
@@ -304,8 +306,15 @@ bot.on('messageCreate',async m=>{
   await m.channel.sendTyping().catch(()=>{});
   const recent=await m.channel.messages.fetch({limit:8}).catch(()=>null);
   const history=recent?[...recent.values()].reverse().filter(x=>x.id!==m.id&&x.content).map(x=>`${x.author.bot?'Atendente':'Cliente'}: ${safe(x.content,300)}`).join('\n'):'';
-  const reply=await gemini(m.content,s,history);
-  if(reply)await m.reply({content:`**Assistente IA**\n${reply}`,allowedMentions:{parse:[],repliedUser:false}});
+  let reply;
+  try{reply=await gemini(m.content,s,history);}
+  catch(e){
+   console.error('IA falhou:',e.message);
+   aiCooldown.set(key,Date.now()+52000);
+   await m.reply({content:`Não consegui responder agora. Nossa equipe vai continuar o atendimento.${devs.has(m.author.id)?`\n-# Erro da IA (só aparece para devs): ${safe(e.message,400)}`:''}`,allowedMentions:{parse:[],repliedUser:false}}).catch(()=>{});
+   return;
+  }
+  await m.reply({content:`**Assistente IA**\n${reply}`,allowedMentions:{parse:[],repliedUser:false}});
  }catch(e){console.error('IA/mensagem:',e.message);}
 });
 // Canal do ticket apagado à mão: encerra o registro e remove o canal de voz associado.
