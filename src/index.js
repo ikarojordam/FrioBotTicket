@@ -1,5 +1,7 @@
 /** Frio Tickets v4.3.1 — Desenvolvido por FrioBots • FrioStore */
 import 'dotenv/config';
+import dns from 'node:dns';
+dns.setDefaultResultOrder('ipv4first');
 import { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, StringSelectMenuBuilder, EmbedBuilder, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelSelectMenuBuilder, RoleSelectMenuBuilder, AttachmentBuilder } from 'discord.js';
 import { createClient } from '@supabase/supabase-js';
 import WebSocket from 'ws';
@@ -135,7 +137,7 @@ async function gemini(text,s,history=''){
   const out=safe(data.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join(''),1800).trim();
   if(!out)throw Error(`resposta vazia (${data.candidates?.[0]?.finishReason||data.promptFeedback?.blockReason||'sem motivo'})`);
   return out;
- }catch(e){if(e.name==='AbortError')throw Error('tempo esgotado ao chamar o Gemini');throw e;}
+ }catch(e){if(e.name==='AbortError')throw Error('tempo esgotado ao chamar o Gemini');if(e.cause?.code)throw Error(`${e.message} (${e.cause.code})`);throw e;}
  finally{clearTimeout(timer);}
 }
 const cmds=[
@@ -196,7 +198,22 @@ if((i.isButton()||i.isModalSubmit())&&i.customId.startsWith('dev:')){
   if(i.customId==='dev:diagnostics')return i.update({embeds:[embed('Diagnóstico • Frio Tickets',diagnostics())],components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('dev:home').setLabel('Voltar').setStyle(ButtonStyle.Secondary))]});
   if(i.customId==='dev:servers'){const names=[...bot.guilds.cache.values()].slice(0,30).map(g=>`• ${safe(g.name,60)} (${g.id})`).join('\n');return i.update({embeds:[embed('Servidores conectados',names||'Nenhum servidor.')],components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('dev:home').setLabel('Voltar').setStyle(ButtonStyle.Secondary))]});}
   if(i.customId==='dev:cache'){cache.clear();departmentCache.clear();return i.update({embeds:[embed('Cache limpo','As configurações serão recarregadas do Supabase quando necessárias.')],components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('dev:home').setLabel('Voltar').setStyle(ButtonStyle.Secondary))]});}
-  if(i.customId==='dev:test_ai'){await i.deferReply({flags:ephemeral});const t0=Date.now(),model=process.env.GEMINI_MODEL||'gemini-3.8-flash';if(!process.env.GEMINI_API_KEY)return i.editReply('GEMINI_API_KEY não está configurada na Discloud.');try{const r=await gemini('Responda apenas: IA funcionando.',defaults);return i.editReply(`IA ok em ${Date.now()-t0} ms\nModelo: ${model}\nResposta: ${safe(r,500)}`);}catch(e){return i.editReply(`Falha na IA (modelo ${model}):\n${safe(e.message,1500)}`);}}
+  if(i.customId==='dev:test_ai'){
+   await i.deferReply({flags:ephemeral});
+   const model=process.env.GEMINI_MODEL||'gemini-3.8-flash';
+   if(!process.env.GEMINI_API_KEY)return i.editReply('GEMINI_API_KEY não está configurada na Discloud.');
+   const lines=[`Modelo: ${model}`];
+   const t1=Date.now();
+   try{
+    const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}`,{headers:{'x-goog-api-key':process.env.GEMINI_API_KEY},signal:AbortSignal.timeout(10000)});
+    lines.push(`1) Conexão, chave e modelo: HTTP ${r.status} em ${Date.now()-t1} ms${r.ok?' ✅':` — ${safe(await r.text().catch(()=>''),300)}`}`);
+    if(!r.ok)return i.editReply(lines.join('\n'));
+   }catch(e){lines.push(`1) Sem conexão com o Gemini a partir da hospedagem: ${e.name==='TimeoutError'?'tempo esgotado (10s)':`${e.message}${e.cause?.code?` (${e.cause.code})`:''}`}`);return i.editReply(lines.join('\n'));}
+   const t2=Date.now();
+   try{const r=await gemini('Responda apenas: IA funcionando.',defaults);lines.push(`2) Resposta em ${Date.now()-t2} ms ✅: ${safe(r,300)}`);}
+   catch(e){lines.push(`2) Falha ao gerar (${Date.now()-t2} ms): ${safe(e.message,600)}`);}
+   return i.editReply(lines.join('\n'));
+  }
   if(i.customId==='dev:sync_commands'){await i.deferUpdate();await new REST({version:'10'}).setToken(process.env.DISCORD_TOKEN).put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID),{body:cmds});return i.editReply(devPanel());}
   if(i.customId==='dev:sync_emojis'){await i.deferReply({flags:ephemeral});let created=0,failed=0;for(const g of bot.guilds.cache.values()){try{const r=await syncGuildEmojis(g);created+=r.created;failed+=r.failed.length;}catch{failed++;}}return i.editReply(`Emojis sincronizados: ${created} novos; ${failed} falhas.`);}
 
