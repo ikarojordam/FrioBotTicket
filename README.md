@@ -1,4 +1,4 @@
-# Frio Tickets v4.4.3
+# Frio Tickets v4.3.1
 
 **Powered by FrioMortal • FrioBots**
 
@@ -36,5 +36,5 @@ Os botões que consultam o banco confirmam a interação antes da consulta. O en
 Somente emojis personalizados do catálogo `src/emojis.js`. Emojis externos precisam estar acessíveis ao bot; use a sincronização com a permissão Gerenciar Expressões. Não há novo SQL.
 
 
-## Diagnóstico v4.4
-Ative `PERF_LOG=true` para registrar o início do ACK e consulte avisos `[INTERACTION] ACK pendente >1500ms` nos logs. Para menus que ainda falharem, envie o `customId` e o log.
+## v4.3.1 — Correções
+Instalação do banco: rode só `sql/000_install_completo.sql`. Detalhes em docs/CHANGELOG-v4.3.1.md.
