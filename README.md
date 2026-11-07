@@ -1,4 +1,4 @@
-# Frio Tickets v4.3.1
+# Frio Tickets v4.4.0
 
 **Powered by FrioMortal • FrioBots**
 
@@ -38,3 +38,11 @@ Somente emojis personalizados do catálogo `src/emojis.js`. Emojis externos prec
 
 ## v4.3.1 — Correções
 Instalação do banco: rode só `sql/000_install_completo.sql`. Detalhes em docs/CHANGELOG-v4.3.1.md.
+
+## v4.4.0 — Painéis, voz, formulários e IA
+- **Painel Staff** (só o cargo configurado): assumir/liberar, notificar membro, transcript, adicionar/remover usuários, renomear, prioridade (baixa/normal/alta/urgente), criar/excluir canal de voz, encerrar.
+- **Painel Membros**: ver status/responsável, notificar quem assumiu (ou a equipe) e encerrar.
+- O canal de voz do ticket é excluído junto com o ticket.
+- **Formulários**: `/ticket config → Departamentos → Gerenciar formulário` (0 a 10 perguntas).
+- **IA**: responde ao autor do ticket enquanto ninguém assumir. Modelo padrão `gemini-3.8-flash` (defina `GEMINI_MODEL` para trocar). Requer `GEMINI_API_KEY` e IA ativada em `/ticket config → Inteligência artificial`.
+- **SQL novo:** rode `sql/007_painel_formularios_voz.sql` (ou `000_install_completo.sql`).
