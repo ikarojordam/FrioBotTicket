@@ -58,6 +58,10 @@ export function staffPanel(t, d, s, uid) {
       row(new StringSelectMenuBuilder().setCustomId('tp:prio').setPlaceholder(`Prioridade atual: ${cur}`).addOptions(
         PRIORITIES.map(p => ({ label: p[0].toUpperCase() + p.slice(1), value: p, default: p === cur, emoji: emoji('priority') })))),
       row(
+        btn('tp:pull', 'Puxar para a call', ButtonStyle.Success, 'phone'),
+        btn('tp:kick', 'Tirar da call', ButtonStyle.Danger, 'remove', !t.voice_channel_id)
+      ),
+      row(
         t.voice_channel_id
           ? btn('tp:voice', 'Excluir canal de voz', ButtonStyle.Danger, 'delete')
           : btn('tp:voice', 'Criar canal de voz', ButtonStyle.Success, 'phone'),
@@ -78,13 +82,22 @@ export function memberPanel(t, d, s) {
     ));
 }
 
+const PICK_MODES = {
+  add: { title: 'Adicionar usuário', icon: 'add', id: 'tp:addpick' },
+  remove: { title: 'Remover usuário', icon: 'remove', id: 'tp:rmpick' },
+  pull: { title: 'Puxar para a call', icon: 'phone', id: 'tp:pullpick', quick: ['tp:pullowner', 'Puxar cliente', 'phone'] },
+  kick: { title: 'Tirar da call', icon: 'remove', id: 'tp:kickpick', quick: ['tp:kickowner', 'Tirar cliente', 'remove'] }
+};
 function pickUserView(mode, s) {
-  const add = mode === 'add';
+  const m = PICK_MODES[mode];
+  const hint = mode === 'pull' ? 'Quem estiver em outro canal de voz é movido para a call do ticket. Quem não estiver em nenhuma call é avisado no ticket.' : mode === 'kick' ? 'Desconecta da call do ticket (o acesso ao ticket continua).' : 'Selecione até 5 usuários.';
+  const buttons = [btn('tp:back', 'Voltar', ButtonStyle.Secondary, 'back')];
+  if (m.quick) buttons.unshift(btn(m.quick[0], m.quick[1], mode === 'pull' ? ButtonStyle.Success : ButtonStyle.Danger, m.quick[2]));
   return new ContainerBuilder().setAccentColor(colorOf(s))
-    .addTextDisplayComponents(text(`## ${icon(add ? 'add' : 'remove')} ${add ? 'Adicionar' : 'Remover'} usuário\nSelecione até 5 usuários.`))
+    .addTextDisplayComponents(text(`## ${icon(m.icon)} ${m.title}\n${hint}`))
     .addActionRowComponents(
-      row(new UserSelectMenuBuilder().setCustomId(add ? 'tp:addpick' : 'tp:rmpick').setPlaceholder('Selecione os usuários').setMinValues(1).setMaxValues(5)),
-      row(btn('tp:back', 'Voltar', ButtonStyle.Secondary, 'back'))
+      row(new UserSelectMenuBuilder().setCustomId(m.id).setPlaceholder('Selecione os usuários').setMinValues(1).setMaxValues(5)),
+      row(...buttons)
     );
 }
 
@@ -111,6 +124,26 @@ function voicePerms(channel, botId) {
     if (o.id === botId) allow.push(PermissionFlagsBits.ManageChannels);
     return { id: o.id, type: o.type, allow, deny: o.deny.has(PermissionFlagsBits.ViewChannel) ? [PermissionFlagsBits.ViewChannel] : [] };
   });
+}
+
+async function createVoice(i, ctx, t) {
+  const vc = await i.guild.channels.create({
+    name: cut(`voz-${i.channel.name}`, 100),
+    type: ChannelType.GuildVoice,
+    parent: i.channel.parentId || undefined,
+    permissionOverwrites: voicePerms(i.channel, ctx.bot.user.id),
+    reason: `Canal de voz do ticket #${t.id}`
+  });
+  try {
+    await ctx.query('tickets', q => q.update({ voice_channel_id: vc.id }).eq('id', t.id));
+  } catch (e) {
+    await vc.delete().catch(() => {});
+    throw new Error('Rode sql/007_painel_formularios_voz.sql no Supabase (coluna voice_channel_id ausente).');
+  }
+  t.voice_channel_id = vc.id;
+  await ctx.event(t.id, i.guildId, i.user.id, 'voice_created', { channel: vc.id });
+  await i.channel.send({ content: `Canal de voz criado: ${vc}. Ele será excluído quando o ticket for encerrado.`, allowedMentions: { parse: [] } });
+  return vc;
 }
 
 /* ---------- entrada principal ---------- */
@@ -285,6 +318,61 @@ async function staffActions(i, ctx) {
       return true;
     }
 
+    if (id === 'tp:pull') { await i.editReply({ components: [pickUserView('pull', s)], flags: V2 }); return true; }
+    if (id === 'tp:kick') {
+      if (!t.voice_channel_id) { await i.followUp({ content: 'Este ticket não tem canal de voz.', flags: EPH }); await showStaff(i, L); return true; }
+      await i.editReply({ components: [pickUserView('kick', s)], flags: V2 });
+      return true;
+    }
+
+    if (id === 'tp:pullpick' || id === 'tp:pullowner') {
+      const ids = id === 'tp:pullowner' ? [t.user_id] : i.values;
+      let vc = t.voice_channel_id ? await i.guild.channels.fetch(t.voice_channel_id).catch(() => null) : null;
+      if (!vc) vc = await createVoice(i, ctx, t);
+      const moved = [], waiting = [], failed = [];
+      for (const uid of ids) {
+        const m = await i.guild.members.fetch(uid).catch(() => null);
+        if (!m || m.user.bot) { failed.push(uid); continue; }
+        await vc.permissionOverwrites.edit(uid, { ViewChannel: true, Connect: true, Speak: true }).catch(() => {});
+        if (!m.voice.channelId) { waiting.push(uid); continue; }
+        if (m.voice.channelId === vc.id) { moved.push(uid); continue; }
+        await m.voice.setChannel(vc, `Puxado para a call do ticket #${t.id} por ${i.user.tag}`).then(() => moved.push(uid)).catch(() => failed.push(uid));
+      }
+      if (waiting.length) await i.channel.send({ content: `${waiting.map(u => `<@${u}>`).join(', ')}, a equipe chamou você para a call do ticket: ${vc}. Entre no canal de voz para participar.`, allowedMentions: { users: waiting } });
+      await ctx.event(t.id, i.guildId, i.user.id, 'voice_pull', { users: ids });
+      const report = [
+        moved.length ? `Na call: ${moved.map(u => `<@${u}>`).join(', ')}` : '',
+        waiting.length ? `Não estavam em nenhuma call (o Discord só move quem já está em voz); foram chamados no ticket: ${waiting.map(u => `<@${u}>`).join(', ')}` : '',
+        failed.length ? `Falhou (verifique a permissão Mover Membros do bot): ${failed.map(u => `<@${u}>`).join(', ')}` : ''
+      ].filter(Boolean).join('\n');
+      await i.followUp({ content: report || 'Nada a fazer.', allowedMentions: { parse: [] }, flags: EPH });
+      await showStaff(i, L);
+      return true;
+    }
+
+    if (id === 'tp:kickpick' || id === 'tp:kickowner') {
+      const ids = id === 'tp:kickowner' ? [t.user_id] : i.values;
+      const done = [], notIn = [], failed = [];
+      for (const uid of ids) {
+        const m = await i.guild.members.fetch(uid).catch(() => null);
+        if (!m) { failed.push(uid); continue; }
+        if (m.voice.channelId !== t.voice_channel_id) { notIn.push(uid); continue; }
+        await m.voice.disconnect(`Removido da call do ticket #${t.id} por ${i.user.tag}`).then(() => done.push(uid)).catch(() => failed.push(uid));
+      }
+      if (done.length) {
+        await ctx.event(t.id, i.guildId, i.user.id, 'voice_kick', { users: done });
+        await i.channel.send({ content: `${done.map(u => `<@${u}>`).join(', ')} ${done.length > 1 ? 'foram retirados' : 'foi retirado'} da call por <@${i.user.id}>.`, allowedMentions: { parse: [] } });
+      }
+      const report = [
+        done.length ? `Retirados: ${done.map(u => `<@${u}>`).join(', ')}` : '',
+        notIn.length ? `Não estavam na call do ticket: ${notIn.map(u => `<@${u}>`).join(', ')}` : '',
+        failed.length ? `Falhou (verifique a permissão Mover Membros do bot): ${failed.map(u => `<@${u}>`).join(', ')}` : ''
+      ].filter(Boolean).join('\n');
+      await i.followUp({ content: report || 'Nada a fazer.', allowedMentions: { parse: [] }, flags: EPH });
+      await showStaff(i, L);
+      return true;
+    }
+
     if (id === 'tp:prio') {
       const value = i.values[0];
       if (!PRIORITIES.includes(value)) return true;
@@ -303,22 +391,7 @@ async function staffActions(i, ctx) {
         t.voice_channel_id = null;
         await i.channel.send({ content: `Canal de voz do ticket removido por <@${i.user.id}>.`, allowedMentions: { parse: [] } });
       } else {
-        const vc = await i.guild.channels.create({
-          name: cut(`voz-${i.channel.name}`, 100),
-          type: ChannelType.GuildVoice,
-          parent: i.channel.parentId || undefined,
-          permissionOverwrites: voicePerms(i.channel, ctx.bot.user.id),
-          reason: `Canal de voz do ticket #${t.id}`
-        });
-        try {
-          await ctx.query('tickets', q => q.update({ voice_channel_id: vc.id }).eq('id', t.id));
-        } catch (e) {
-          await vc.delete().catch(() => {});
-          throw new Error('Rode sql/007_painel_formularios_voz.sql no Supabase (coluna voice_channel_id ausente).');
-        }
-        t.voice_channel_id = vc.id;
-        await ctx.event(t.id, i.guildId, i.user.id, 'voice_created', { channel: vc.id });
-        await i.channel.send({ content: `Canal de voz criado: ${vc}. Ele será excluído quando o ticket for encerrado.`, allowedMentions: { parse: [] } });
+        await createVoice(i, ctx, t);
       }
       await showStaff(i, L);
       return true;

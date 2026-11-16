@@ -9,12 +9,14 @@ import { buildTranscript } from './transcript.js';
 import { emoji, icon, bindEmojiClient } from './emojis.js';
 import { syncGuildEmojis } from './emoji-sync.js';
 import { handleTicketUI } from './ticket-ui.js';
+import { registerCall, restoreCalls, handleCall } from './call.js';
+import { VERSION_LABEL } from './version.js';
 import { getQuestions } from './forms.js';
 
 const needed=['DISCORD_TOKEN','DISCORD_CLIENT_ID','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY'];
 for(const k of needed)if(!process.env[k])throw new Error(`Variável obrigatória ausente: ${k}`);
 const db=createClient(process.env.SUPABASE_URL,process.env.SUPABASE_SERVICE_ROLE_KEY,{auth:{persistSession:false,autoRefreshToken:false},realtime:{transport:WebSocket}});
-const bot=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent]});
+const bot=new Client({intents:[GatewayIntentBits.Guilds,GatewayIntentBits.GuildMessages,GatewayIntentBits.MessageContent,GatewayIntentBits.GuildVoiceStates]});
 bindEmojiClient(bot);
 const devs=new Set((process.env.DEV_IDS||'').split(',').map(x=>x.trim()).filter(Boolean));
 const brand=process.env.BRAND_NAME||'Frio Tickets',fallbackSignature=process.env.BRAND_SIGNATURE||'Desenvolvido por FrioBots • FrioStore';
@@ -38,7 +40,7 @@ const ephemeral=MessageFlags.Ephemeral;
 function devPanel(){
  const status=globalBrand.banner_visible?'Ativo':'Oculto';
  const e=embed(`${icon('config')} • Central do desenvolvedor`,
- `**IDENTIDADE DO BOT**\n> **Nome:** ${bot.user?.username||brand}\n> **Atividade:** ${safe(globalBrand.activity_text,100)}\n> **Assinatura:** ${safe(signature(),160)}\n> **Banner:** ${status}\n\n**SISTEMA**\n> **Servidores:** ${bot.guilds.cache.size}\n> **Hospedagem:** Discloud • **Banco:** Supabase\n\nEscolha uma ferramenta abaixo para editar.`,{});
+ `**IDENTIDADE DO BOT**\n> **Nome:** ${bot.user?.username||brand}\n> **Atividade:** ${safe(globalBrand.activity_text,100)}\n> **Assinatura:** ${safe(signature(),160)}\n> **Banner:** ${status}\n\n**SISTEMA**\n> **Versão:** ${VERSION_LABEL}\n> **Servidores:** ${bot.guilds.cache.size}\n> **Hospedagem:** Discloud • **Banco:** Supabase\n\nEscolha uma ferramenta abaixo para editar.`,{});
  e.setAuthor({name:'FRIO TICKETS • Administração global'});
  const B=(id,label,key,style=ButtonStyle.Secondary)=>{const b=new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style);if(key)b.setEmoji(emoji(key));return b;};
  return {embeds:[e],components:[
@@ -122,23 +124,81 @@ async function closeTicket(i,t,s,reason='Encerrado pela equipe'){if(!i.deferred&
  if(t.voice_channel_id)await i.guild.channels.delete(t.voice_channel_id,'Ticket encerrado').catch(()=>{});
  await i.editReply(`Ticket encerrado. O canal será removido em alguns segundos.${dmOk===false?'\nNão foi possível enviar o transcript por DM (mensagens diretas fechadas).':''}`);setTimeout(()=>i.channel.delete('Ticket encerrado').catch(()=>{}),5000);}
 async function stats(g){const [tickets,ratings]=await Promise.all([query('tickets',q=>q.select('id,status,created_at').eq('guild_id',g).limit(1000)),query('ticket_ratings',q=>q.select('score').eq('guild_id',g).limit(1000))]);const avg=ratings.length?(ratings.reduce((a,b)=>a+b.score,0)/ratings.length).toFixed(2):'Sem avaliações';return `Tickets registrados (até 1000): **${tickets.length}**\nAbertos: **${tickets.filter(t=>t.status==='open').length}**\nEncerrados: **${tickets.filter(t=>t.status==='closed').length}**\nAvaliação média: **${avg}**`;}
-async function gemini(text,s,history='',timeoutMs=0){
- if(!process.env.GEMINI_API_KEY)return null;
- const model=process.env.GEMINI_MODEL||'gemini-3.8-flash';
- const ctrl=new AbortController(),timer=setTimeout(()=>ctrl.abort(),timeoutMs||Math.max(Number(process.env.AI_TIMEOUT_MS)||0,30000));
+const GEMINI_BASE='https://generativelanguage.googleapis.com/v1beta';
+let geminiDiscovery={t:0,list:[]};
+async function geminiDiscover(){
+ if(Date.now()-geminiDiscovery.t<600000)return geminiDiscovery.list;
+ geminiDiscovery.t=Date.now();
  try{
-  // Gemini 3.x: sem temperature e com thinkingLevel (low/medium/high). Gemini 2.5: thinkingBudget. Outros: só temperature.
-  const generationConfig={maxOutputTokens:1500};
-  if(/^gemini-3/.test(model))generationConfig.thinkingConfig={thinkingLevel:['low','medium','high'].includes(process.env.GEMINI_THINKING)?process.env.GEMINI_THINKING:'low'};
-  else{generationConfig.temperature=0.4;if(/2\.5/.test(model))generationConfig.thinkingConfig={thinkingBudget:0};}
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json','x-goog-api-key':process.env.GEMINI_API_KEY},body:JSON.stringify({systemInstruction:{parts:[{text:`${s.ai_prompt}\nResponda em português do Brasil, de forma curta e objetiva.\nBase de conhecimento (não invente dados):\n${safe(s.knowledge_base,8000)}\nNão peça senhas, tokens ou dados de pagamento. Se faltar informação, diga que a equipe humana vai ajudar.`}]},contents:[{role:'user',parts:[{text:`${history?`Conversa recente:\n${history}\n\n`:''}Mensagem do cliente: ${safe(text,3000)}`}]}],generationConfig})});
-  if(!r.ok)throw Error(`Gemini ${r.status}: ${safe(await r.text().catch(()=>''),300)}`);
-  const data=await r.json();
-  const out=safe(data.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join(''),1800).trim();
-  if(!out)throw Error(`resposta vazia (${data.candidates?.[0]?.finishReason||data.promptFeedback?.blockReason||'sem motivo'})`);
-  return out;
- }catch(e){if(e.name==='AbortError')throw Error('tempo esgotado ao chamar o Gemini');if(e.cause?.code)throw Error(`${e.message} (${e.cause.code})`);throw e;}
- finally{clearTimeout(timer);}
+  const r=await fetch(`${GEMINI_BASE}/models?pageSize=200`,{headers:{'x-goog-api-key':process.env.GEMINI_API_KEY},signal:AbortSignal.timeout(8000)});
+  const j=await r.json();
+  geminiDiscovery.list=(j.models||[]).filter(x=>(x.supportedGenerationMethods||[]).includes('generateContent')&&/flash/.test(x.name)&&!/image|tts|live|audio|embed|robotics|computer|thinking|exp/.test(x.name)).map(x=>x.name.replace('models/','')).sort((x,y)=>(/lite/.test(x)-/lite/.test(y))||y.localeCompare(x,'en',{numeric:true}));
+ }catch(e){console.warn('Gemini: não consegui listar modelos:',e.message);}
+ return geminiDiscovery.list;
+}
+// Uma tentativa em streaming (SSE): o tempo limite vale para "ficar sem receber dados", não para a resposta inteira.
+async function geminiOnce(model,text,s,history,{idleMs,totalMs}){
+ const ctrl=new AbortController();
+ let idle;const arm=()=>{clearTimeout(idle);idle=setTimeout(()=>ctrl.abort(),idleMs);};
+ const total=setTimeout(()=>ctrl.abort(),totalMs);
+ try{
+  arm();
+  const level=['low','medium','high'].includes(process.env.GEMINI_THINKING)?process.env.GEMINI_THINKING:'low';
+  const cfg={maxOutputTokens:1500};
+  if(/^gemini-3/.test(model))cfg.thinkingConfig={thinkingLevel:level};
+  else{cfg.temperature=0.4;if(/2\.5/.test(model))cfg.thinkingConfig={thinkingBudget:0};}
+  const body={systemInstruction:{parts:[{text:`${s.ai_prompt}\nResponda em português do Brasil, de forma curta e objetiva.\nBase de conhecimento (não invente dados):\n${safe(s.knowledge_base,8000)}\nNão peça senhas, tokens ou dados de pagamento. Se faltar informação, diga que a equipe humana vai ajudar.`}]},contents:[{role:'user',parts:[{text:`${history?`Conversa recente:\n${history}\n\n`:''}Mensagem do cliente: ${safe(text,3000)}`}]}],generationConfig:cfg};
+  const r=await fetch(`${GEMINI_BASE}/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`,{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json','x-goog-api-key':process.env.GEMINI_API_KEY},body:JSON.stringify(body)});
+  if(!r.ok)throw Error(`HTTP ${r.status}: ${safe(await r.text().catch(()=>''),300)}`);
+  let out='',buf='',finish='';
+  const dec=new TextDecoder();
+  for await(const chunk of r.body){
+   arm();
+   buf+=dec.decode(chunk,{stream:true});
+   let nl;
+   while((nl=buf.indexOf('\n'))>=0){
+    const line=buf.slice(0,nl).trim();buf=buf.slice(nl+1);
+    if(!line.startsWith('data:'))continue;
+    const payload=line.slice(5).trim();
+    if(!payload||payload==='[DONE]')continue;
+    let j;try{j=JSON.parse(payload);}catch{continue;}
+    const c=j.candidates?.[0];
+    for(const part of c?.content?.parts||[])if(part.text&&!part.thought)out+=part.text;
+    if(c?.finishReason)finish=c.finishReason;
+    if(j.promptFeedback?.blockReason)finish=j.promptFeedback.blockReason;
+   }
+  }
+  out=out.trim();
+  if(!out)throw Error(`resposta vazia (${finish||'sem motivo'})`);
+  return safe(out,1800);
+ }catch(e){
+  if(ctrl.signal.aborted)throw Error('sem resposta (tempo esgotado)');
+  throw Error(`${e.message}${e.cause?.code?` (${e.cause.code})`:''}`);
+ }finally{clearTimeout(idle);clearTimeout(total);}
+}
+// Tenta GEMINI_MODEL (padrão gemini-3.8-flash); se travar/falhar, tenta GEMINI_FALLBACK_MODELS e depois modelos flash que a sua chave enxerga.
+async function gemini(text,s,history='',opts={}){
+ if(!process.env.GEMINI_API_KEY)return null;
+ const queue=[process.env.GEMINI_MODEL||'gemini-3.8-flash',...(process.env.GEMINI_FALLBACK_MODELS||'').split(',').map(x=>x.trim()).filter(Boolean)];
+ const tried=new Set(),errors=[];let discovered=false;
+ for(let n=0;n<queue.length&&tried.size<3;n++){
+  const model=queue[n];
+  if(tried.has(model))continue;
+  tried.add(model);
+  const t0=Date.now();
+  try{
+   const out=await geminiOnce(model,text,s,history,tried.size===1?{idleMs:18000,totalMs:40000}:{idleMs:10000,totalMs:20000});
+   opts.log?.(`✅ ${model}: ${Date.now()-t0} ms`);
+   gemini.lastModel=model;
+   return out;
+  }catch(e){
+   errors.push(`${model}: ${e.message}`);
+   opts.log?.(`❌ ${model} (${Date.now()-t0} ms): ${safe(e.message,200)}`);
+   if(/HTTP 40[13]/.test(e.message)&&/API key|permission|denied/i.test(e.message))break;
+   if(!discovered&&n===queue.length-1){discovered=true;for(const m of await geminiDiscover())if(!queue.includes(m))queue.push(m);}
+  }
+ }
+ throw Error(errors.join(' | ')||'nenhum modelo disponível');
 }
 const cmds=[
  new SlashCommandBuilder().setName('ticket').setDescription('Central de tickets FrioBots')
@@ -146,12 +206,13 @@ const cmds=[
   .addSubcommand(x=>x.setName('painel').setDescription('Publicar painel neste canal'))
   .addSubcommand(x=>x.setName('estatisticas').setDescription('Indicadores de atendimento'))
   .addSubcommand(x=>x.setName('ajuda').setDescription('Ajuda e comandos do sistema')),
+ new SlashCommandBuilder().setName('call').setDescription('Mantém o bot em uma call de voz (entrar/sair)').setDMPermission(false),
  new SlashCommandBuilder().setName('dev').setDescription('Ferramentas globais FrioBots')
   .addSubcommand(x=>x.setName('ticket').setDescription('Central exclusiva do desenvolvedor'))
 ].map(x=>x.toJSON());
 const startedAt=Date.now();
-const helpText=()=>`**Frio Tickets • Comandos**\n**Slash:** /ticket config, /ticket painel, /ticket estatisticas, /ticket ajuda, /dev ticket\n**Prefixo (${PREFIX}):** ${['add @usuário','rem @usuário','fechar','assumir','renomear nome','prioridade baixa|normal|alta|urgente','bloquear @usuário','desbloquear @usuário'].map(x=>'`'+PREFIX+x+'`').join(' • ')}\n\nPowered by FrioMortal`;
-const diagnostics=()=>`**Diagnóstico global**\n> **Bot:** ${bot.user?.tag||'desconectado'}\n> **Servidores:** ${bot.guilds.cache.size}\n> **Uptime:** ${Math.floor((Date.now()-startedAt)/60000)} minutos\n> **Ping:** ${bot.ws.ping} ms\n> **Memória:** ${Math.round(process.memoryUsage().rss/1024/1024)} MB\n> **Node.js:** ${process.version}\n> **Cache:** ${cache.size} servidores\n> **IA:** ${process.env.GEMINI_API_KEY?'chave configurada':'SEM GEMINI_API_KEY'} • ${process.env.GEMINI_MODEL||'gemini-3.8-flash'}`;
+const helpText=()=>`**Frio Tickets • Comandos** (${VERSION_LABEL})\n**Slash:** /ticket config, /ticket painel, /ticket estatisticas, /ticket ajuda, /call, /dev ticket\n**Prefixo (${PREFIX}):** ${['add @usuário','rem @usuário','fechar','assumir','renomear nome','prioridade baixa|normal|alta|urgente','mover @usuário #call','bloquear @usuário','desbloquear @usuário'].map(x=>'`'+PREFIX+x+'`').join(' • ')}\n\nPowered by FrioMortal`;
+const diagnostics=()=>`**Diagnóstico global**\n> **Versão:** ${VERSION_LABEL}\n> **Bot:** ${bot.user?.tag||'desconectado'}\n> **Servidores:** ${bot.guilds.cache.size}\n> **Uptime:** ${Math.floor((Date.now()-startedAt)/60000)} minutos\n> **Ping:** ${bot.ws.ping} ms\n> **Memória:** ${Math.round(process.memoryUsage().rss/1024/1024)} MB\n> **Node.js:** ${process.version}\n> **Cache:** ${cache.size} servidores\n> **IA:** ${process.env.GEMINI_API_KEY?'chave configurada':'SEM GEMINI_API_KEY'} • ${process.env.GEMINI_MODEL||'gemini-3.8-flash'}`;
 
 
 async function departmentsView(g){
@@ -166,7 +227,10 @@ async function departmentsView(g){
 }
 const ctx={bot,db,query,settings,departments,departmentCache,event,admin,embed,safe,brand,signature,openTicket,panelRows,departmentsView};
 
-bot.once('clientReady',async()=>{console.log(`${brand} online: ${bot.user.tag}`);await loadGlobalBrand().catch(e=>console.error('Marca global:',e.message));try{bot.user.setActivity(globalBrand.activity_text);}catch(e){console.error("Atividade inicial:",e.message);}if(process.env.REGISTER_COMMANDS!=='false')try{await new REST({version:'10'}).setToken(process.env.DISCORD_TOKEN).put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID),{body:cmds});console.log('Comandos registrados.');}catch(e){console.error('Falha no registro de comandos:',e);}if(process.env.AUTO_SYNC_EMOJIS==='true'){for(const guild of bot.guilds.cache.values()){try{const r=await syncGuildEmojis(guild);console.log(`[Emojis] ${guild.id}: +${r.created}, existentes ${r.skipped}, falhas ${r.failed.length}`);}catch(e){console.warn(`[Emojis] ${guild.id}: ${e.message}`);}await new Promise(resolve=>setTimeout(resolve,1500));}}});
+
+registerCall(bot,{query});
+
+bot.once('clientReady',async()=>{console.log(`${brand} ${VERSION_LABEL} online: ${bot.user.tag}`);restoreCalls().catch(e=>console.warn('[Call] restauração:',e.message));await loadGlobalBrand().catch(e=>console.error('Marca global:',e.message));try{bot.user.setActivity(globalBrand.activity_text);}catch(e){console.error("Atividade inicial:",e.message);}if(process.env.REGISTER_COMMANDS!=='false')try{await new REST({version:'10'}).setToken(process.env.DISCORD_TOKEN).put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID),{body:cmds});console.log('Comandos registrados.');}catch(e){console.error('Falha no registro de comandos:',e);}if(process.env.AUTO_SYNC_EMOJIS==='true'){for(const guild of bot.guilds.cache.values()){try{const r=await syncGuildEmojis(guild);console.log(`[Emojis] ${guild.id}: +${r.created}, existentes ${r.skipped}, falhas ${r.failed.length}`);}catch(e){console.warn(`[Emojis] ${guild.id}: ${e.message}`);}await new Promise(resolve=>setTimeout(resolve,1500));}}});
 bot.on('guildCreate',async guild=>{if(process.env.AUTO_SYNC_EMOJIS!=='true')return;try{await syncGuildEmojis(guild);}catch(e){console.warn(`[Emojis] ${guild.id}: ${e.message}`);}});
 bot.on('interactionCreate',async i=>{
  const started=performance.now();
@@ -183,6 +247,7 @@ bot.on('interactionCreate',async i=>{
  }
  try{
 if(await handleTicketUI(i,ctx))return;
+if(await handleCall(i,ctx))return;
 if(i.isChatInputCommand()){
 if(i.commandName==='dev'){if(!devOnly(i))return send(i,'Acesso restrito ao desenvolvedor.');return i.reply({...devPanel(),flags:ephemeral});}
 if(!i.inGuild())return send(i,'Disponível apenas em servidores.');const sub=i.options.getSubcommand();if(sub==='config'){if(!admin(i))return send(i,'Somente administradores podem configurar.');await i.deferReply({flags:ephemeral});return i.editReply(configHome(await settings(i.guildId)));}
@@ -200,19 +265,12 @@ if((i.isButton()||i.isModalSubmit())&&i.customId.startsWith('dev:')){
   if(i.customId==='dev:cache'){cache.clear();departmentCache.clear();return i.update({embeds:[embed('Cache limpo','As configurações serão recarregadas do Supabase quando necessárias.')],components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('dev:home').setLabel('Voltar').setStyle(ButtonStyle.Secondary))]});}
   if(i.customId==='dev:test_ai'){
    await i.deferReply({flags:ephemeral});
-   const model=process.env.GEMINI_MODEL||'gemini-3.8-flash';
    if(!process.env.GEMINI_API_KEY)return i.editReply('GEMINI_API_KEY não está configurada na Discloud.');
-   const lines=[`Modelo: ${model}`];
-   const t1=Date.now();
-   try{
-    const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}`,{headers:{'x-goog-api-key':process.env.GEMINI_API_KEY},signal:AbortSignal.timeout(10000)});
-    lines.push(`1) Conexão, chave e modelo: HTTP ${r.status} em ${Date.now()-t1} ms${r.ok?' ✅':` — ${safe(await r.text().catch(()=>''),300)}`}`);
-    if(!r.ok)return i.editReply(lines.join('\n'));
-   }catch(e){lines.push(`1) Sem conexão com o Gemini a partir da hospedagem: ${e.name==='TimeoutError'?'tempo esgotado (10s)':`${e.message}${e.cause?.code?` (${e.cause.code})`:''}`}`);return i.editReply(lines.join('\n'));}
-   const t2=Date.now();
-   try{const r=await gemini('Responda apenas: IA funcionando.',defaults,'',60000);lines.push(`2) Resposta em ${Date.now()-t2} ms ✅: ${safe(r,300)}`);}
-   catch(e){lines.push(`2) Falha ao gerar (${Date.now()-t2} ms): ${safe(e.message,600)}`);}
-   return i.editReply(lines.join('\n'));
+   const lines=[`Modelo principal: ${process.env.GEMINI_MODEL||'gemini-3.8-flash'} • raciocínio: ${process.env.GEMINI_THINKING||'low'}`];
+   const t0=Date.now();
+   try{const r=await gemini('Responda apenas: IA funcionando.',defaults,'',{log:l=>lines.push(l)});lines.push(`Resposta em ${Date.now()-t0} ms: ${safe(r,300)}`);}
+   catch(e){lines.push(`Todas as tentativas falharam: ${safe(e.message,600)}`);}
+   return i.editReply(safe(lines.join('\n'),1900));
   }
   if(i.customId==='dev:sync_commands'){await i.deferUpdate();await new REST({version:'10'}).setToken(process.env.DISCORD_TOKEN).put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID),{body:cmds});return i.editReply(devPanel());}
   if(i.customId==='dev:sync_emojis'){await i.deferReply({flags:ephemeral});let created=0,failed=0;for(const g of bot.guilds.cache.values()){try{const r=await syncGuildEmojis(g);created+=r.created;failed+=r.failed.length;}catch{failed++;}}return i.editReply(`Emojis sincronizados: ${created} novos; ${failed} falhas.`);}
@@ -262,7 +320,7 @@ if(i.isMessageComponent()||i.isModalSubmit())return send(i,'Esta ação não est
 }catch(e){console.error('Erro na interação:',e);const msg=`Não foi possível concluir a ação: ${safe(e.message,140)}`;if(i.deferred&&!i.replied)await i.editReply({content:msg,embeds:[],components:[]}).catch(()=>{});else if(i.replied)await i.followUp({content:msg,flags:ephemeral}).catch(()=>{});else await i.reply({content:msg,flags:ephemeral}).catch(()=>{});}});
 // Comandos de prefixo: atalhos administrativos; menus continuam em interações.
 const PREFIX=process.env.BOT_PREFIX||'.';
-const PREFIX_COMMANDS=new Set(['add','adicionar','rem','remover','fechar','assumir','renomear','prioridade','bloquear','desbloquear']);
+const PREFIX_COMMANDS=new Set(['mover','add','adicionar','rem','remover','fechar','assumir','renomear','prioridade','bloquear','desbloquear']);
 async function handlePrefix(m){
  if(!m.guild||m.author.bot||!PREFIX||!m.content.startsWith(PREFIX))return false;
  const parts=m.content.slice(PREFIX.length).trim().split(/\s+/);
@@ -274,6 +332,33 @@ async function handlePrefix(m){
  const t=await query('tickets',q=>q.select('*').eq('channel_id',m.channel.id).eq('status','open').maybeSingle());
  const d=t?.department_id?await query('ticket_departments',q=>q.select('*').eq('id',t.department_id).maybeSingle()):null;
  const staff=permitted||Boolean((s.staff_role_id&&m.member.roles.cache.has(s.staff_role_id))||(d?.staff_role_id&&m.member.roles.cache.has(d.staff_role_id)));
+ if(cmd==='mover'){
+  if(!(staff||m.member.permissions.has(PermissionFlagsBits.MoveMembers))){await reply('Apenas a equipe pode mover pessoas.');return true;}
+  const usage=`Use \`${PREFIX}mover @usuário #canal-de-voz\`. Vários usuários e \`todos\` (todos da sua call) também funcionam; sem canal, move para a sua call.`;
+  const ids=parts.map(x=>x.replace(/[<@!#&>]/g,'')).filter(x=>/^\d{15,22}$/.test(x));
+  let dest=m.mentions.channels.find(c=>c.isVoiceBased());
+  if(!dest)for(const id of ids){const c=m.guild.channels.cache.get(id);if(c?.isVoiceBased()){dest=c;break;}}
+  if(!dest)dest=m.member.voice.channel||null;
+  if(!dest){await reply(`Informe o canal de voz de destino. ${usage}`);return true;}
+  if(!dest.permissionsFor(m.member)?.has(PermissionFlagsBits.ViewChannel)){await reply('Você não tem acesso a esse canal.');return true;}
+  const botPerms=dest.permissionsFor(m.guild.members.me);
+  if(!botPerms?.has(PermissionFlagsBits.MoveMembers)||!botPerms.has(PermissionFlagsBits.Connect)){await reply('Eu preciso das permissões **Mover Membros** e **Conectar** nesse canal.');return true;}
+  const targets=new Map();
+  if(parts.some(x=>x.toLowerCase()==='todos')){const from=m.member.voice.channel;if(!from){await reply('Entre em uma call para usar `todos`.');return true;}for(const [id,mm] of from.members)if(!mm.user.bot)targets.set(id,mm);}
+  for(const mm of m.mentions.members?.values()||[])if(!mm.user.bot)targets.set(mm.id,mm);
+  for(const id of ids){if(m.guild.channels.cache.has(id)||m.guild.roles.cache.has(id))continue;const mm=m.guild.members.cache.get(id)||await m.guild.members.fetch(id).catch(()=>null);if(mm&&!mm.user.bot)targets.set(mm.id,mm);}
+  if(!targets.size){await reply(`Informe quem mover. ${usage}`);return true;}
+  const moved=[],already=[],offline=[],failed=[];
+  for(const mm of targets.values()){
+   if(t?.voice_channel_id===dest.id)await dest.permissionOverwrites.edit(mm.id,{ViewChannel:true,Connect:true,Speak:true}).catch(()=>{});
+   if(!mm.voice.channelId){offline.push(mm.id);continue;}
+   if(mm.voice.channelId===dest.id){already.push(mm.id);continue;}
+   await mm.voice.setChannel(dest,`Movido por ${m.author.tag}`).then(()=>moved.push(mm.id)).catch(()=>failed.push(mm.id));
+  }
+  const list=a=>a.map(x=>`<@${x}>`).join(', ');
+  await reply([moved.length?`Movidos para ${dest}: ${list(moved)}`:'',already.length?`Já estavam em ${dest}: ${list(already)}`:'',offline.length?`Não estão em nenhuma call (o Discord só move quem já está em voz): ${list(offline)}`:'',failed.length?`Não consegui mover (cargo acima do meu ou sem permissão): ${list(failed)}`:''].filter(Boolean).join('\n'));
+  return true;
+ }
  if(['fechar','assumir','renomear','prioridade'].includes(cmd)){
   if(!t){await reply('Este comando só funciona em um ticket aberto.');return true;}
   if(!staff && !(cmd==='fechar'&&t.user_id===m.author.id)){await reply('Ação restrita à equipe de atendimento.');return true;}
