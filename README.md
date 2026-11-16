@@ -1,4 +1,4 @@
-# Frio Tickets v4.4.0
+# Frio Tickets
 
 **Powered by FrioMortal • FrioBots**
 
@@ -46,3 +46,9 @@ Instalação do banco: rode só `sql/000_install_completo.sql`. Detalhes em docs
 - **Formulários**: `/ticket config → Departamentos → Gerenciar formulário` (0 a 10 perguntas).
 - **IA**: responde ao autor do ticket enquanto ninguém assumir. Modelo padrão `gemini-3.8-flash` (defina `GEMINI_MODEL` para trocar). Requer `GEMINI_API_KEY` e IA ativada em `/ticket config → Inteligência artificial`.
 - **SQL novo:** rode `sql/007_painel_formularios_voz.sql` (ou `000_install_completo.sql`).
+
+## 0.0.0.1 beta — /call e novo versionamento
+- **/call** abre um painel V2 com **Entrar**, **Sair** e um menu para escolher a call. O bot fica na call (mudo/surdo) e **volta sozinho** depois de queda do sistema, reinício da hospedagem ou se for desconectado: a call fica salva no banco (`ticket_call_presence`), é restaurada no boot e conferida a cada 45 s. **Sair** desliga a reconexão.
+- Requer Node 22.12+, permissões **Ver canal** e **Conectar** e o SQL `sql/008_call_presence.sql`.
+- **Versão:** `src/version.js` (`RELEASE`). 1 → 0.0.0.1 · 9 → 0.0.0.9 · 10 → 0.0.1.0 · 20 → 0.0.2.0. Aumente `RELEASE` em 1 a cada entrega.
+- `.mover @usuário #call` (vários usuários, `todos`, sem canal = sua call) e Painel Staff com Puxar/Tirar da call.

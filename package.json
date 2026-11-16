@@ -1,19 +1,20 @@
 {
   "name": "frio-tickets",
-  "version": "4.4.5",
+  "version": "0.0.0-beta.1",
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20 <27"
+    "node": ">=22.12 <27"
   },
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/emojis.js && node --check src/emoji-sync.js && node --check src/transcript.js"
+    "check": "node --check src/index.js && node --check src/emojis.js && node --check src/emoji-sync.js && node --check src/transcript.js && node --check src/ticket-ui.js && node --check src/forms.js && node --check src/call.js && node --check src/version.js"
   },
   "dependencies": {
     "discord.js": "^14.22.1",
     "dotenv": "^16.4.5",
     "@supabase/supabase-js": "^2.57.0",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "@discordjs/voice": "^0.19.0"
   }
 }
