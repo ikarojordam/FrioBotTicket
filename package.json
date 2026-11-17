@@ -7,7 +7,7 @@
     "node": ">=22.12 <27"
   },
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node --max-old-space-size=128 src/index.js",
     "check": "node --check src/index.js && node --check src/emojis.js && node --check src/emoji-sync.js && node --check src/transcript.js && node --check src/ticket-ui.js && node --check src/forms.js && node --check src/call.js && node --check src/version.js"
   },
   "dependencies": {

@@ -52,3 +52,6 @@ Instalação do banco: rode só `sql/000_install_completo.sql`. Detalhes em docs
 - Requer Node 22.12+, permissões **Ver canal** e **Conectar** e o SQL `sql/008_call_presence.sql`.
 - **Versão:** `src/version.js` (`RELEASE`). 1 → 0.0.0.1 · 9 → 0.0.0.9 · 10 → 0.0.1.0 · 20 → 0.0.2.0. Aumente `RELEASE` em 1 a cada entrega.
 - `.mover @usuário #call` (vários usuários, `todos`, sem canal = sua call) e Painel Staff com Puxar/Tirar da call.
+
+## RAM na Discloud (240 MB)
+Configuração e ressalvas em `docs/RAM-240MB.md`. A meta não é garantia de consumo máximo real.
