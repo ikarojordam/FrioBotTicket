@@ -77,8 +77,7 @@ export function memberPanel(t, d, s) {
     .addSeparatorComponents(sep())
     .addActionRowComponents(row(
       btn('tm:notify', 'Notificar staff', ButtonStyle.Primary, 'notify'),
-      btn('tm:refresh', 'Atualizar', ButtonStyle.Secondary, 'repeat'),
-      btn('tm:close', 'Encerrar ticket', ButtonStyle.Danger, 'close')
+      btn('tm:refresh', 'Atualizar', ButtonStyle.Secondary, 'repeat')
     ));
 }
 
@@ -109,7 +108,7 @@ async function load(i, ctx, { opening = false } = {}) {
   const d = t.department_id ? await ctx.query('ticket_departments', q => q.select('*').eq('id', t.department_id).maybeSingle()) : null;
   // Só o cargo configurado (geral ou do departamento). Sem cargo configurado, apenas administradores.
   const roles = [s.staff_role_id, d?.staff_role_id].filter(Boolean);
-  const staff = roles.length ? roles.some(r => i.member?.roles?.cache?.has(r)) : Boolean(ctx.admin(i));
+  const staff = Boolean(ctx.admin(i)) || roles.some(r => i.member?.roles?.cache?.has(r));
   return { t, s, d, staff };
 }
 
@@ -239,7 +238,7 @@ async function openMember(i, ctx) {
 /* ---------- ações do Painel Staff ---------- */
 async function staffActions(i, ctx) {
   const id = i.customId;
-  if (id === 'tp:close') { await i.showModal(closeModal()); return true; }
+  if (id === 'tp:close') { const L=await ctx.query('tickets',q=>q.select('*').eq('channel_id',i.channelId).eq('status','open').maybeSingle());if(!L)return i.reply({content:'Ticket não encontrado.',flags:EPH});const st=await ctx.settings(i.guildId),dp=L.department_id?await ctx.query('ticket_departments',q=>q.select('*').eq('id',L.department_id).maybeSingle()):null;const roles=[st.staff_role_id,dp?.staff_role_id].filter(Boolean);if(!ctx.admin(i)&&!roles.some(r=>i.member?.roles?.cache?.has(r)))return i.reply({content:'Somente a equipe pode encerrar tickets.',flags:EPH});await i.showModal(closeModal()); return true; }
   if (id === 'tp:rename') {
     await i.showModal(new ModalBuilder().setCustomId('tp:renamem').setTitle('Renomear ticket')
       .addComponents(row(new TextInputBuilder().setCustomId('name').setLabel('Novo nome do canal').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80))));
@@ -416,7 +415,7 @@ async function staffActions(i, ctx) {
 /* ---------- ações do Painel Membros ---------- */
 async function memberActions(i, ctx) {
   const id = i.customId;
-  if (id === 'tm:close') { await i.showModal(closeModal()); return true; }
+  if (id === 'tm:close') { await i.reply({content:'Somente a equipe pode encerrar tickets.',flags:EPH}); return true; }
   try {
     await i.deferUpdate();
     const L = await load(i, ctx);
