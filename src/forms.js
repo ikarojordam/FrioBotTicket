@@ -43,4 +43,4 @@ export function readAnswers(interaction, questions, page) {
 const pending = new Map();
 export const stashAnswers = (key, answers) => pending.set(key, { answers, time: Date.now() });
 export const takeAnswers = key => { const x = pending.get(key); pending.delete(key); return x && Date.now() - x.time < 600000 ? x.answers : null; };
-setInterval(() => { for (const [k, v] of pending) if (Date.now() - v.time > 600000) pending.delete(k); }, 300000).unref();
+setInterval(() => { for (const [k, v] of pending) if (Date.now() - v.time > 600000) pending.delete(k); }, 10000).unref();

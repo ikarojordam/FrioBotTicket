@@ -13,6 +13,10 @@ const V2 = MessageFlags.IsComponentsV2;
 const EPH = MessageFlags.Ephemeral;
 export const PRIORITIES = ['baixa', 'normal', 'alta', 'urgente'];
 const notifyCooldown = new Map();
+setInterval(() => {
+ const now=Date.now();
+ for (const [id,when] of notifyCooldown) if(now-when>60000)notifyCooldown.delete(id);
+},10000).unref();
 const cut = (v, n) => String(v ?? '').slice(0, n);
 
 /* ---------- helpers de componentes ---------- */

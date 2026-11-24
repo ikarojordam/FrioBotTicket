@@ -15,7 +15,11 @@ const lib = () => (libPromise ??= import('@discordjs/voice').catch(e => { libPro
 
 const desired = new Map(); // guildId -> channelId em que o bot deve ficar
 const busy = new Set();    // guildIds com entrada em andamento
-const picked = new Map();  // `${guildId}:${userId}` -> canal escolhido no menu
+const picked = new Map();  // `${guildId}:${userId}` -> { channelId, time }
+setInterval(() => {
+ const now=Date.now();
+ for(const [key,value] of picked) if(now-value.time>600000)picked.delete(key);
+},10000).unref();
 
 /* ---------- conexão ---------- */
 async function connect(guild, channelId) {
@@ -31,6 +35,12 @@ async function connect(guild, channelId) {
   if (current) { try { current.destroy(); } catch {} }
 
   const connection = V.joinVoiceChannel({ channelId, guildId: guild.id, adapterCreator: guild.voiceAdapterCreator, selfDeaf: true, selfMute: true });
+  // VoiceConnection é um EventEmitter: sem listener de 'error', erros de WebSocket (ex.: HTTP 522) derrubam o Node.js.
+  // O vigia periódico já cuida da reconexão; não criar novos loops de retry dentro do handler.
+  connection.on('error', (err) => {
+    console.warn(`[Call] ${guild.id}: falha na conexão de voz: ${err?.message || err}`);
+    try { if (connection.state.status !== V.VoiceConnectionStatus.Destroyed) connection.destroy(); } catch {}
+  });
   connection.on(V.VoiceConnectionStatus.Disconnected, async () => {
     try {
       await Promise.race([V.entersState(connection, V.VoiceConnectionStatus.Signalling, 5000), V.entersState(connection, V.VoiceConnectionStatus.Connecting, 5000)]);
@@ -116,7 +126,7 @@ async function callLeave(guild) {
 async function panel(guild, uid, s) {
   let where = null;
   try { const V = await lib(); const c = V.getVoiceConnection(guild.id); if (c && c.state.status === V.VoiceConnectionStatus.Ready) where = c.joinConfig.channelId; } catch {}
-  const want = desired.get(guild.id), sel = picked.get(`${guild.id}:${uid}`);
+  const want = desired.get(guild.id), sel = picked.get(`${guild.id}:${uid}`)?.channelId;
   const color = /^#[0-9a-f]{6}$/i.test(s?.brand_color || '') ? parseInt(s.brand_color.slice(1), 16) : 0x5865f2;
   const btn = (id, label, style, key) => new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style).setEmoji(emoji(key));
   return new ContainerBuilder().setAccentColor(color)
@@ -154,9 +164,9 @@ export async function handleCall(i, ctx) {
   await i.deferUpdate();
   const key = `${i.guildId}:${i.user.id}`;
   try {
-    if (i.customId === 'call:pick') picked.set(key, i.values[0]);
+    if (i.customId === 'call:pick') picked.set(key, {channelId:i.values[0],time:Date.now()});
     if (i.customId === 'call:join') {
-      const target = picked.get(key) || i.member?.voice?.channelId;
+      const target = picked.get(key)?.channelId || i.member?.voice?.channelId;
       if (!target) await i.followUp({ content: 'Escolha uma call no menu ou entre em uma call e clique em Entrar.', flags: EPH });
       else {
         const r = await callJoin(i.guild, target, i.user.id);
