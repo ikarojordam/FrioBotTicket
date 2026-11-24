@@ -12,7 +12,7 @@
 Perfil, assinaturas, banner, diagnóstico, lista de servidores, limpar cache, sincronizar comandos e emojis.
 
 ## Implantação
-Use Discloud com `discloud.config` na raiz. Configure `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DEV_IDS`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`. Para IA: `GEMINI_API_KEY`. Para prefixo: `BOT_PREFIX=.` e ative Message Content Intent no portal do Discord.
+
 
 ## Banco
 Todos os SQLs anteriores estão em `sql/`. Nenhum SQL novo nesta atualização.
@@ -44,7 +44,7 @@ Instalação do banco: rode só `sql/000_install_completo.sql`. Detalhes em docs
 - **Painel Membros**: ver status/responsável, notificar quem assumiu (ou a equipe) e encerrar.
 - O canal de voz do ticket é excluído junto com o ticket.
 - **Formulários**: `/ticket config → Departamentos → Gerenciar formulário` (0 a 10 perguntas).
-- **IA**: responde ao autor do ticket enquanto ninguém assumir. Modelo padrão `gemini-3.8-flash` (defina `GEMINI_MODEL` para trocar). Requer `GEMINI_API_KEY` e IA ativada em `/ticket config → Inteligência artificial`.
+
 - **SQL novo:** rode `sql/007_painel_formularios_voz.sql` (ou `000_install_completo.sql`).
 
 ## 0.0.0.1 beta — /call e novo versionamento
@@ -55,3 +55,55 @@ Instalação do banco: rode só `sql/000_install_completo.sql`. Detalhes em docs
 
 ## RAM na Discloud (240 MB)
 Configuração e ressalvas em `docs/RAM-240MB.md`. A meta não é garantia de consumo máximo real.
+
+## Correções de /ticket config e cache (24/11/2026)
+- Roteamento entre canais e tópicos: menu com no máximo 5 linhas, submenu dedicado para logs/cargo e navegação após salvar.
+- Seleção de modos, categorias, canal-pai, cargo e logs preservada.
+- Limpeza de entradas TEMPORÁRIAS vencidas a cada **10 segundos** (configurações, departamentos, cooldowns, formulários e seleções de call).
+- Limite de cache Discord.js reduzido; limpeza de mensagens antigas a cada 10 segundos.
+- A limpeza **não apaga** canais, permissões, tickets no Supabase, conexão de voz, nem configurações válidas.
+- `RAM=240` permanece em `discloud.config`; o consumo real deve ser monitorado na Discloud.
+- Execute `npm run check` antes do deploy, e teste todos os menus com a conta de administrador no Discord.
+- Para usar categorias/tópicos, rode `sql/009_ticket_modes.sql` se essa migração ainda não foi aplicada.
+
+
+### Logs de avaliações — atendente
+O log de avaliações agora inclui **Quem assumiu**, recuperado do campo `tickets.claimed_by`. Se ninguém assumiu, mostra **Não assumido**. Nenhuma migração SQL adicional é necessária.
+
+## Convite OAuth2 automático
+Use `/convidar` para gerar um botão com o link oficial de instalação do bot em outro servidor. Administradores também encontram a opção **Link de convite** em `/dev ticket` (restrita aos desenvolvedores configurados). O link é criado com o ID da aplicação conectada, sem token ou chave sensível. Solicita `bot` e `applications.commands` e um conjunto de permissões direcionadas aos recursos de tickets, tópicos, mensagens e voz (sem Administrator). Não é necessário SQL novo.
+
+No Developer Portal do Discord, confira se a instalação em servidores (Guild Install) está habilitada. O usuário que instalar o bot precisa das permissões de gerenciamento de servidor/aplicativos.
+
+## Respostas automáticas locais e análise de imagens (24/11/2026)
+- Ative `/ticket config → Inteligência artificial → Ativar IA`. O nome histórico do botão também ativa a FAQ **sem precisar de chave**.
+- `/ticket respostas` (administrador): mostra status e como personalizar perguntas/respostas.
+- 37 perguntas/intenções frequentes com variações: pedidos, suporte, pagamentos, acesso, entrega, garantia, atendimento etc. Respostas locais são modelos genéricos, sem inventar preços ou prazos.
+- No campo **Instruções e conhecimento**, acrescente pares `Pergunta: ...` e `Resposta: ...` em linhas consecutivas para sobrepor as respostas padrão.
+
+
+- Sem chave da API, o bot **não finge** enxergar imagens: avisa que só pode ajudar com a descrição feita pelo cliente.
+- As respostas ocorrem apenas dentro do ticket do autor, quando a IA estiver habilitada e nenhum atendente tiver assumido. Cooldown de 8 segundos por ticket.
+- A análise de imagem envia o conteúdo visual ao provedor de IA. Avise os usuários nas regras e evite capturas que contenham senhas, tokens ou informações confidenciais.
+- Sem SQL novo. Mantidos logs, convite, controle de 240 MB e limpeza de entradas vencidas a cada 10 segundos. O consumo real pode variar, especialmente na análise de imagens.
+
+
+## Atendimento local sem API de IA (24/11/2026)
+
+- Removidas as chamadas Gemini e variáveis GEMINI_* do aplicativo em execução.
+- Motor local de FAQ com 39 intenções e respostas personalizadas a partir da base de conhecimento do servidor (formato `Pergunta:` / `Resposta:`).
+- No ticket aberto, responde ao cliente enquanto nenhum atendente assumiu.
+- Para imagens: envia **Analisando…** e depois informa com transparência que reconheceu um anexo, mas não interpreta o conteúdo visual. Texto da mensagem pode gerar resposta local.
+- `/ticket respostas` informa o status, e o teste do painel dev avalia exemplos sem internet.
+- Não é um modelo de linguagem generativo treinado, mas um motor de classificação e busca de respostas de baixo consumo de RAM.
+- Supabase e Discord continuam necessários para a operação normal do bot; "sem APIs" refere-se à IA.
+- Não há SQL novo. O consumo total de RAM deve ser observado na Discloud.
+
+## Aprendizado com Supabase
+Execute `sql/011_ai_knowledge_learning.sql`. Veja `docs/IA-BASE-SUPABASE.md`.
+
+## Aprendizado por servidor (loja + Frio Applications)
+Consulte `docs/IA-DOIS-SERVIDORES.md`. Não mistura conhecimentos entre servidores.
+
+## +lockall, +unlockall e resposta a menções (24/11/2026)
+Execute **`sql/014_lockall_backups.sql`** antes de implantar a atualização. Leia `docs/LOCKALL-E-MENCOES.md` para permissões, limitações e teste. O comando `+lockall` restringe envio nos canais e criação de tópicos para @everyone, sem mexer em `SendMessagesInThreads`; `+unlockall` restaura o estado salvo no Supabase. Ao mencionar o bot, ele pergunta “Qual sua dúvida/problema?”.

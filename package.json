@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node --max-old-space-size=128 src/index.js",
-    "check": "node --check src/index.js && node --check src/emojis.js && node --check src/emoji-sync.js && node --check src/transcript.js && node --check src/ticket-ui.js && node --check src/forms.js && node --check src/call.js && node --check src/version.js"
+    "check": "node --check src/index.js && node --check src/emojis.js && node --check src/emoji-sync.js && node --check src/transcript.js && node --check src/ticket-ui.js && node --check src/forms.js && node --check src/call.js && node --check src/version.js && node --check src/local-ai.js && node --check src/knowledge-db.js && node --check src/image-attachment.js && node --check src/lockall.js"
   },
   "dependencies": {
     "discord.js": "^14.22.1",
