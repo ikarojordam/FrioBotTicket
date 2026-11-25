@@ -107,3 +107,12 @@ Consulte `docs/IA-DOIS-SERVIDORES.md`. Não mistura conhecimentos entre servidor
 
 ## +lockall, +unlockall e resposta a menções (24/11/2026)
 Execute **`sql/014_lockall_backups.sql`** antes de implantar a atualização. Leia `docs/LOCKALL-E-MENCOES.md` para permissões, limitações e teste. O comando `+lockall` restringe envio nos canais e criação de tópicos para @everyone, sem mexer em `SendMessagesInThreads`; `+unlockall` restaura o estado salvo no Supabase. Ao mencionar o bot, ele pergunta “Qual sua dúvida/problema?”.
+
+## Consultas públicas sem chave e dicionário (nova versão)
+O assistente usa uma base de conhecimento separada por servidor e, se ela não tiver resposta confiável, consulta **somente** uma fonte pública apropriada à pergunta. Consulte `docs/APIS-PUBLICAS-E-VOCABULARIO.md`.
+
+Execute opcionalmente `sql/015_vocabulario_suporte.sql` após `011`/`013` para acrescentar definições de suporte a **FrioStore** e **Frio Applications**. Não substitui as respostas aprendidas. API pública não equivale a IA generativa. O conteúdo de imagens não é interpretado visualmente. Ative Open-Meteo somente após revisar os termos de uso comercial.
+
+
+## Vocabulário expandido a partir dos chats
+Execute `sql/016_vocabulario_expandido_chats.sql` após as migrações de IA. Consulte `docs/VOCABULARIO-AMPLIADO-016.md`.
