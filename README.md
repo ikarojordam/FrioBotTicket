@@ -116,3 +116,16 @@ Execute opcionalmente `sql/015_vocabulario_suporte.sql` após `011`/`013` para a
 
 ## Vocabulário expandido a partir dos chats
 Execute `sql/016_vocabulario_expandido_chats.sql` após as migrações de IA. Consulte `docs/VOCABULARIO-AMPLIADO-016.md`.
+
+## Atualização: contexto e qualidade das respostas (25/11/2026)
+- Perguntas genéricas não têm mais prioridade indevida sobre perguntas específicas.
+- O avaliador reclassifica os resultados do Supabase por assunto, similaridade, conhecimento do servidor e confiança.
+- Mensagens recentes do cliente no mesmo ticket (máximo quatro, TTL de cinco minutos) ajudam a interpretar perguntas curtas de continuação.
+- A seleção não responde quando a confiança é baixa ou quando duas respostas conflitantes estão empatadas.
+- As respostas aprendidas do servidor da FrioStore não são misturadas às da Frio Applications.
+- As últimas mensagens ficam apenas temporariamente em memória e são limpas a cada 10 segundos; não há armazenamento de conversas adicionais no Supabase.
+- Preservadas as integrações, comandos, o período de 25 segundos e a configuração de 240 MB.
+- Nenhuma migração SQL adicional é necessária, desde que `sql/013_ai_search_scalable.sql` já esteja instalada.
+- Testes locais: `node --test tests/knowledge-context.test.js`.
+
+A análise continua sendo feita por regras e sem um modelo generativo. Para dúvidas ambíguas ou desconhecidas, o bot pede esclarecimento ou encaminha à equipe.
