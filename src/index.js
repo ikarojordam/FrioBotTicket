@@ -15,6 +15,7 @@ import { getQuestions } from './forms.js';
 import { createKnowledge, clearKnowledge, expireKnowledge } from './knowledge-db.js';
 import { imageAttachment } from './image-attachment.js';
 import { handleServerLock } from './lockall.js';
+import { publicApiAnswer, expirePublicApiCache } from './public-apis.js';
 
 const needed=['DISCORD_TOKEN','DISCORD_CLIENT_ID','SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY'];
 for(const k of needed)if(!process.env[k])throw new Error(`Variável obrigatória ausente: ${k}`);
@@ -67,6 +68,7 @@ setInterval(()=>{
  for(const [id,entry] of departmentCache) if(now-entry.time>CACHE_TTL_MS)departmentCache.delete(id);
  for(const [id,time] of aiCooldown) if(now-time>3600000)aiCooldown.delete(id);
  expireKnowledge();
+ expirePublicApiCache();
  for(const [k,t] of mentionCooldown)if(now-t>60000)mentionCooldown.delete(k);
  if(process.env.RAM_LOG==='true' && now-lastRamLog>=60000){
   lastRamLog=now;
@@ -474,7 +476,12 @@ async function answerPendingTicket(m,t){
   if(Date.now()-(aiCooldown.get(key)||0)<8000)return;
   const img=imageAttachment(m),caption=String(m.content||'').trim();
   if(!caption&&!img)return;
-  const response=caption?await knowledge.answer(m.guild.id,caption):null;
+  // A base de conhecimento do servidor tem prioridade sobre a informação pública.
+  let response=caption?await knowledge.answer(m.guild.id,caption):null;
+  let external=null;
+  if(!response && caption && !img)external=await publicApiAnswer(m.guild.id,m.author.id,caption);
+  // Se o atendimento foi assumido enquanto a API respondia, não envia a resposta.
+
   // Checagem final reduz o risco de uma resposta após a equipe assumir durante a consulta.
   const check=await query('tickets',q=>q.select('claimed_by').eq('id',t.id).eq('status','open').maybeSingle());
   if(!check||check.claimed_by)return;
@@ -490,6 +497,7 @@ async function answerPendingTicket(m,t){
    return;
   }
   if(response){await m.reply({...opts,content:`**Assistente automático • Frio Tickets**\n${response.answer}`});return;}
+  if(external){await m.reply({...opts,content:`**Assistente automático • Consulta pública (${external.source})**\n${external.answer}`});return;}
   void knowledge.markUnanswered(m.guild.id,caption).catch(e=>console.warn('IA perguntas:',e.message));
   await m.reply({...opts,content:'**Assistente automático • Frio Tickets**\nAinda não tenho uma resposta confiável para isso. Pode detalhar sua dúvida? A equipe poderá assumir e continuar o atendimento.'});
  }catch(e){console.error('IA/atendimento:',e.message);}
