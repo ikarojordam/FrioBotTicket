@@ -53,6 +53,10 @@ const defaults={panel_title:'Central de Atendimento',panel_description:'Selecion
 const cache=new Map(),locks=new Set(),aiCooldown=new Map();
 // Espera de 25 s após a criação do ticket; no máximo uma mensagem pendente por canal.
 const pendingAi=new Map();
+// Somente texto recente do próprio cliente por ticket; sem persistir mensagens na memória.
+const recentQuestions=new Map();
+function rememberQuestion(channel,text){const value=String(text||'').trim().slice(0,350);if(!value)return;const now=Date.now();const previous=recentQuestions.get(channel)||[];recentQuestions.set(channel,[...previous.filter(x=>now-x.time<300000),{text:value,time:now}].slice(-4));}
+function previousContext(channel,current){const recent=recentQuestions.get(channel)||[];return recent.filter(x=>x.text!==current&&Date.now()-x.time<300000).slice(-2).map(x=>x.text).join(' ').slice(0,350);}
 function cancelPendingAi(channelId){const pending=pendingAi.get(channelId);if(pending?.timer)clearTimeout(pending.timer);pendingAi.delete(channelId);}
 const departmentCache=new Map();
 const pendingSettings=new Map();
@@ -68,6 +72,7 @@ setInterval(()=>{
  for(const [id,entry] of departmentCache) if(now-entry.time>CACHE_TTL_MS)departmentCache.delete(id);
  for(const [id,time] of aiCooldown) if(now-time>3600000)aiCooldown.delete(id);
  expireKnowledge();
+ for(const [id,items] of recentQuestions)if(!items.some(x=>now-x.time<300000))recentQuestions.delete(id);
  expirePublicApiCache();
  for(const [k,t] of mentionCooldown)if(now-t>60000)mentionCooldown.delete(k);
  if(process.env.RAM_LOG==='true' && now-lastRamLog>=60000){
@@ -477,7 +482,7 @@ async function answerPendingTicket(m,t){
   const img=imageAttachment(m),caption=String(m.content||'').trim();
   if(!caption&&!img)return;
   // A base de conhecimento do servidor tem prioridade sobre a informação pública.
-  let response=caption?await knowledge.answer(m.guild.id,caption):null;
+  let response=caption?await knowledge.answer(m.guild.id,caption,previousContext(key,caption)):null;
   let external=null;
   if(!response && caption && !img)external=await publicApiAnswer(m.guild.id,m.author.id,caption);
   // Se o atendimento foi assumido enquanto a API respondia, não envia a resposta.
@@ -571,10 +576,11 @@ bot.on('messageCreate',async m=>{
   if(!s.ai_enabled)return;
   if(!String(m.content||'').trim()&&!imageAttachment(m))return;
   scheduleAutomaticReply(m,t);
+  rememberQuestion(m.channel.id,m.content);
  }catch(e){console.error('IA/mensagem:',e.message);}
 });
 // Canal do ticket apagado à mão: encerra o registro e remove o canal de voz associado.
-const handleTicketRemoval=async ch=>{cancelPendingAi(ch.id);try{if(!ch.guild||![ChannelType.GuildText,ChannelType.PrivateThread].includes(ch.type))return;const t=await query('tickets',q=>q.select('id,voice_channel_id').eq('channel_id',ch.id).eq('status','open').maybeSingle());if(!t)return;await query('tickets',q=>q.update({status:'closed',closed_at:stamp(),close_reason:'Canal excluído manualmente'}).eq('id',t.id));if(t.voice_channel_id)await ch.guild.channels.delete(t.voice_channel_id,'Ticket removido').catch(()=>{});}catch(e){console.error('ticket removal:',e.message);}};
+const handleTicketRemoval=async ch=>{cancelPendingAi(ch.id);recentQuestions.delete(ch.id);try{if(!ch.guild||![ChannelType.GuildText,ChannelType.PrivateThread].includes(ch.type))return;const t=await query('tickets',q=>q.select('id,voice_channel_id').eq('channel_id',ch.id).eq('status','open').maybeSingle());if(!t)return;await query('tickets',q=>q.update({status:'closed',closed_at:stamp(),close_reason:'Canal excluído manualmente'}).eq('id',t.id));if(t.voice_channel_id)await ch.guild.channels.delete(t.voice_channel_id,'Ticket removido').catch(()=>{});}catch(e){console.error('ticket removal:',e.message);}};
 bot.on('channelDelete',handleTicketRemoval);
 bot.on('threadDelete',handleTicketRemoval);
 // Verificação leve de inatividade, sem varreduras pesadas ou deleções automáticas.

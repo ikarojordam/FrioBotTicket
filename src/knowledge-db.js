@@ -5,13 +5,15 @@ const cache=new Map();
 export function clearKnowledge(guild){if(guild){for(const k of cache.keys())if(k.startsWith(`${guild}:`))cache.delete(k);}else cache.clear();}
 export function expireKnowledge(){const now=Date.now();for(const [k,v] of cache)if(now-v.time>15000)cache.delete(k);while(cache.size>80)cache.delete(cache.keys().next().value);}
 export function createKnowledge(db){
- async function answer(guild,text){
+ async function answer(guild,text,context=''){
   const normalized=normalizeFAQ(text);if(normalized.length<2||normalized.length>500)return null;
-  const key=`${guild}:${normalized}`,recent=cache.get(key);
+  const contextKey=normalizeFAQ(context).slice(0,250);
+  const key=`${guild}:${normalized}:${contextKey}`,recent=cache.get(key);
   if(recent&&Date.now()-recent.time<15000)return recent.answer;
-  const {data,error}=await db.rpc('ticket_ai_search',{p_guild:String(guild),p_question:normalized,p_limit:30});
+  const lookup=contextKey && normalized.split(' ').length<=4 ? `${contextKey} ${normalized}`.slice(0,500) : normalized;
+  const {data,error}=await db.rpc('ticket_ai_search',{p_guild:String(guild),p_question:lookup,p_limit:30});
   if(error)throw new Error(`Falha na busca de conhecimento. Execute sql/013_ai_search_scalable.sql: ${error.message}`);
-  const result=localAnswer(text,data||[]);
+  const result=localAnswer(text,data||[],{guildId:guild,context});
   if(cache.size>=80)cache.delete(cache.keys().next().value);
   cache.set(key,{answer:result,time:Date.now()});return result;
  }
